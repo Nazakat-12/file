@@ -1,0 +1,739 @@
+
+
+MEMORY TRICKS (READ FIRST):
+----------------------------
+BN:         Edge → CPD → add_cpds → check_model → query
+Markov:     States → Matrix(rows sum=1) → random.choice → count
+KMeans:     Encode → Drop ID → Elbow → Scale → fit_predict → plot
+Supervised: Load → Clean → Encode → Split → Scale(train only) → fit → predict → score
+MinMax:     check_win → is_full → max picks max / min picks min → undo move
+
+================================================================
+LAB 8 — MINIMAX (Tic Tac Toe)
+================================================================
+
+board = [[' ']*3 for _ in range(3)]
+
+def check_winner(board, player):
+    for i in range(3):
+        if all(board[i][j] == player for j in range(3)): return True
+        if all(board[j][i] == player for j in range(3)): return True
+    if all(board[i][i] == player for i in range(3)): return True
+    if all(board[i][2-i] == player for i in range(3)): return True
+    return False
+
+def is_full(board):
+    return all(board[i][j] != ' ' for i in range(3) for j in range(3))
+
+def minimax(board, is_maximizing):
+    if check_winner(board, 'X'): return 1    # AI wins  = +1
+    if check_winner(board, 'O'): return -1   # Human wins = -1
+    if is_full(board): return 0              # Draw = 0
+
+    if is_maximizing:
+        best = float('-inf')
+        for i in range(3):
+            for j in range(3):
+                if board[i][j] == ' ':
+                    board[i][j] = 'X'
+                    best = max(best, minimax(board, False))
+                    board[i][j] = ' '   # UNDO move
+        return best
+    else:
+        best = float('inf')
+        for i in range(3):
+            for j in range(3):
+                if board[i][j] == ' ':
+                    board[i][j] = 'O'
+                    best = min(best, minimax(board, True))
+                    board[i][j] = ' '   # UNDO move
+        return best
+
+def best_move(board):
+    best_score = float('-inf')
+    move = None
+    for i in range(3):
+        for j in range(3):
+            if board[i][j] == ' ':
+                board[i][j] = 'X'
+                score = minimax(board, False)
+                board[i][j] = ' '
+                if score > best_score:
+                    best_score = score
+                    move = (i, j)
+    return move
+
+def print_board(board):
+    for i, row in enumerate(board):
+        print(' | '.join(row))
+        if i < 2: print('-'*5)
+
+def play():
+    print_board(board)
+    while True:
+        r, c = map(int, input("Enter row col (0-2): ").split())
+        if board[r][c] != ' ':
+            print("Invalid!"); continue
+        board[r][c] = 'O'
+        print_board(board)
+        if check_winner(board, 'O'): print("You win!"); break
+        if is_full(board): print("Draw!"); break
+        r, c = best_move(board)
+        board[r][c] = 'X'
+        print_board(board)
+        if check_winner(board, 'X'): print("AI wins!"); break
+        if is_full(board): print("Draw!"); break
+
+play()
+
+----------------------------------------------------------------
+LAB 8 — ALPHA BETA PRUNING (Coin Game)
+----------------------------------------------------------------
+
+def alpha_beta(coins, left, right, is_max, alpha, beta):
+    if left > right:
+        return 0
+
+    if is_max:
+        pick_left  = coins[left]  + alpha_beta(coins, left+1, right,   False, alpha, beta)
+        pick_right = coins[right] + alpha_beta(coins, left,   right-1, False, alpha, beta)
+        best = max(pick_left, pick_right)
+        alpha = max(alpha, best)
+        if beta <= alpha:
+            return best  # PRUNE
+        return best
+    else:
+        pick_left  = alpha_beta(coins, left+1, right,   True, alpha, beta)
+        pick_right = alpha_beta(coins, left,   right-1, True, alpha, beta)
+        best = min(pick_left, pick_right)
+        beta = min(beta, best)
+        if beta <= alpha:
+            return best  # PRUNE
+        return best
+
+coins = [3, 9, 1, 2, 7, 5]
+result = alpha_beta(coins, 0, len(coins)-1, True, float('-inf'), float('inf'))
+print("Max best score:", result)
+
+
+================================================================
+LAB 9 — BAYESIAN NETWORK
+================================================================
+
+# GOLDEN RULES:
+# Root node  (no parents) = 1 column
+# 1 parent 2 states       = 2 columns
+# 2 parents 2 states each = 2x2 = 4 columns
+# 3 parents 2 states each = 2x2x2 = 8 columns
+# EVERY COLUMN MUST SUM TO 1.0
+# evidence index = 0 or 1 (not 'Yes' or 'No')
+
+from pgmpy.models import DiscreteBayesianNetwork
+from pgmpy.factors.discrete import TabularCPD
+from pgmpy.inference import VariableElimination
+
+# ---- BURGLARY ALARM (from your lab manual) ----
+
+model = DiscreteBayesianNetwork([
+    ('Burglary',   'Alarm'),
+    ('Earthquake', 'Alarm'),
+    ('Alarm',      'JohnCalls'),
+    ('Alarm',      'MaryCalls')
+])
+
+# Root nodes — no parents — 1 column
+cpd_burglary   = TabularCPD('Burglary',   2, [[0.999], [0.001]])
+cpd_earthquake = TabularCPD('Earthquake', 2, [[0.998], [0.002]])
+
+# Alarm has 2 parents (Burglary, Earthquake) both card=2 → 4 columns
+# Column order: (B=0,E=0) | (B=0,E=1) | (B=1,E=0) | (B=1,E=1)
+cpd_alarm = TabularCPD(
+    variable='Alarm', variable_card=2,
+    values=[
+        [0.999, 0.71, 0.06, 0.05],   # Alarm=0 (False)
+        [0.001, 0.29, 0.94, 0.95]    # Alarm=1 (True)
+    ],
+    evidence=['Burglary', 'Earthquake'],
+    evidence_card=[2, 2]
+)
+
+# JohnCalls has 1 parent (Alarm) card=2 → 2 columns
+cpd_john = TabularCPD(
+    variable='JohnCalls', variable_card=2,
+    values=[
+        [0.3, 0.9],   # JohnCalls=0 | Alarm=0, Alarm=1
+        [0.7, 0.1]    # JohnCalls=1
+    ],
+    evidence=['Alarm'], evidence_card=[2]
+)
+
+cpd_mary = TabularCPD(
+    variable='MaryCalls', variable_card=2,
+    values=[
+        [0.2, 0.99],
+        [0.8, 0.01]
+    ],
+    evidence=['Alarm'], evidence_card=[2]
+)
+
+model.add_cpds(cpd_burglary, cpd_earthquake, cpd_alarm, cpd_john, cpd_mary)
+assert model.check_model(), "Model is wrong!"
+
+infer = VariableElimination(model)
+result = infer.query(variables=['Burglary'],
+                     evidence={'JohnCalls': 1, 'MaryCalls': 1})
+print(result)
+
+----------------------------------------------------------------
+# DISEASE EXAMPLE (Flu/Cold with symptoms)
+# Disease → Fever, Cough, Fatigue, Chills
+----------------------------------------------------------------
+
+model2 = DiscreteBayesianNetwork([
+    ('Disease', 'Fever'),
+    ('Disease', 'Cough'),
+    ('Disease', 'Fatigue'),
+    ('Disease', 'Chills')
+])
+
+# Disease: 0=Flu, 1=Cold
+cpd_disease = TabularCPD('Disease', 2, [[0.3], [0.7]])
+
+# Each symptom has 1 parent (Disease) → 2 columns
+cpd_fever = TabularCPD('Fever', 2,
+    values=[[0.1, 0.5],   # Fever=0
+            [0.9, 0.5]],  # Fever=1
+    evidence=['Disease'], evidence_card=[2])
+
+cpd_cough = TabularCPD('Cough', 2,
+    values=[[0.2, 0.4],
+            [0.8, 0.6]],
+    evidence=['Disease'], evidence_card=[2])
+
+cpd_fatigue = TabularCPD('Fatigue', 2,
+    values=[[0.3, 0.7],
+            [0.7, 0.3]],
+    evidence=['Disease'], evidence_card=[2])
+
+cpd_chills = TabularCPD('Chills', 2,
+    values=[[0.4, 0.6],
+            [0.6, 0.4]],
+    evidence=['Disease'], evidence_card=[2])
+
+model2.add_cpds(cpd_disease, cpd_fever, cpd_cough, cpd_fatigue, cpd_chills)
+assert model2.check_model()
+
+infer2 = VariableElimination(model2)
+
+# Task 1: P(Disease | Fever=Yes, Cough=Yes)
+r1 = infer2.query(variables=['Disease'], evidence={'Fever': 1, 'Cough': 1})
+print(r1)
+
+# Task 2: P(Disease | Fever=Yes, Cough=Yes, Chills=Yes)
+r2 = infer2.query(variables=['Disease'], evidence={'Fever': 1, 'Cough': 1, 'Chills': 1})
+print(r2)
+
+# Task 3: P(Fatigue=Yes | Disease=Flu)
+r3 = infer2.query(variables=['Fatigue'], evidence={'Disease': 0})
+print(r3)
+
+----------------------------------------------------------------
+# 3-PARENT NODE EXAMPLE (Score depends on 3 variables)
+# Score(3 states) | Background(2) Practice(2) Difficulty(2) = 8 columns
+----------------------------------------------------------------
+
+model3 = DiscreteBayesianNetwork([
+    ('Background', 'Score'),
+    ('Practice',   'Score'),
+    ('Difficulty', 'Score'),
+    ('Score',      'Certification')
+])
+
+cpd_bg   = TabularCPD('Background', 2, [[0.35], [0.65]])
+cpd_prac = TabularCPD('Practice',   2, [[0.30], [0.70]])
+cpd_diff = TabularCPD('Difficulty', 2, [[0.50], [0.50]])
+
+# Score has 3 states: 0=Low, 1=Medium, 2=High
+# 3 parents x card=2 each = 8 columns
+# Column order (rightmost changes fastest):
+# (Bg=0,Pr=0,Di=0)(Bg=0,Pr=0,Di=1)(Bg=0,Pr=1,Di=0)(Bg=0,Pr=1,Di=1)
+# (Bg=1,Pr=0,Di=0)(Bg=1,Pr=0,Di=1)(Bg=1,Pr=1,Di=0)(Bg=1,Pr=1,Di=1)
+cpd_score = TabularCPD(
+    variable='Score', variable_card=3,
+    values=[
+        [0.6, 0.5, 0.4, 0.3, 0.3, 0.2, 0.1, 0.05],  # Low
+        [0.3, 0.3, 0.4, 0.4, 0.4, 0.4, 0.3, 0.25],  # Medium
+        [0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.6, 0.70],  # High
+    ],
+    evidence=['Background', 'Practice', 'Difficulty'],
+    evidence_card=[2, 2, 2]
+)
+
+cpd_cert = TabularCPD(
+    variable='Certification', variable_card=2,
+    values=[
+        [0.70, 0.30, 0.08],   # No
+        [0.30, 0.70, 0.92]    # Yes
+    ],
+    evidence=['Score'], evidence_card=[3]
+)
+
+model3.add_cpds(cpd_bg, cpd_prac, cpd_diff, cpd_score, cpd_cert)
+assert model3.check_model()
+
+infer3 = VariableElimination(model3)
+r = infer3.query(variables=['Certification'],
+                 evidence={'Practice': 1, 'Difficulty': 0})
+print(r)
+
+
+================================================================
+LAB 9 — MARKOV MODEL
+================================================================
+
+import numpy as np
+
+# TRAFFIC SIGNAL (Green=0, Yellow=1, Red=2)
+states = ['Green', 'Yellow', 'Red']
+
+# Transition matrix: row=FROM state, col=TO state
+# EVERY ROW MUST SUM TO 1.0
+transition = np.array([
+    [0.6, 0.3, 0.1],   # From Green
+    [0.1, 0.2, 0.7],   # From Yellow
+    [0.2, 0.1, 0.7],   # From Red
+])
+
+def simulate(start_idx, n_steps):
+    current = start_idx
+    sequence = [states[current]]
+    for _ in range(n_steps):
+        current = np.random.choice(len(states), p=transition[current])
+        sequence.append(states[current])
+    return sequence
+
+# Simulate 10 steps from Green
+seq = simulate(0, 10)
+print(" -> ".join(seq))
+print("Red count:", seq.count('Red'))
+
+# P(Red appears >= 4 times in 10 steps)
+total = 10000
+count = sum(1 for _ in range(total) if simulate(0, 10).count('Red') >= 4)
+print(f"P(Red >= 4) = {count/total:.4f}")
+
+# ---- WEATHER (Sunny=0, Cloudy=1, Rainy=2) ----
+states_w = ['Sunny', 'Cloudy', 'Rainy']
+
+transition_w = np.array([
+    [0.7, 0.2, 0.1],   # From Sunny
+    [0.3, 0.4, 0.3],   # From Cloudy
+    [0.2, 0.3, 0.5],   # From Rainy
+])
+
+def simulate_weather(start_idx, n_steps):
+    current = start_idx
+    seq = [states_w[current]]
+    for _ in range(n_steps):
+        current = np.random.choice(len(states_w), p=transition_w[current])
+        seq.append(states_w[current])
+    return seq
+
+seq_w = simulate_weather(0, 10)  # Start Sunny
+print(" -> ".join(seq_w))
+
+# P(at least 3 Rainy days)
+count_w = sum(1 for _ in range(10000)
+              if simulate_weather(0, 10).count('Rainy') >= 3)
+print(f"P(Rainy >= 3) = {count_w/10000:.4f}")
+
+
+================================================================
+LAB 10 — SUPERVISED LEARNING (Full Pipeline)
+================================================================
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import train_test_split, KFold, LeaveOneOut
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import (accuracy_score, confusion_matrix,
+                              roc_curve, roc_auc_score,
+                              classification_report)
+
+# ============================================================
+# STEP 1: LOAD & UNDERSTAND
+# ============================================================
+df = pd.read_csv('data.csv')
+print(df.head())           # first 5 rows
+print(df.shape)            # (rows, cols)
+print(df.info())           # types + nulls
+print(df.describe())       # stats
+print(df.isnull().sum())   # missing per column
+
+# ============================================================
+# STEP 2: CLEAN MISSING VALUES
+# ============================================================
+df['age']  = df['age'].fillna(df['age'].mean())          # number → mean
+df['city'] = df['city'].fillna(df['city'].mode()[0])     # text → mode
+df = df.dropna()                                          # drop rest
+
+# ============================================================
+# STEP 3: ENCODE CATEGORICAL
+# ============================================================
+le = LabelEncoder()
+df['gender'] = le.fit_transform(df['gender'])            # 2 categories
+
+df = pd.get_dummies(df, columns=['city'], drop_first=True)  # 3+ categories
+
+# ============================================================
+# STEP 4: VISUALIZE
+# ============================================================
+df[['age', 'salary']].hist(bins=20, figsize=(8, 4))
+plt.show()
+
+sns.heatmap(df.corr(), annot=True, cmap='coolwarm')
+plt.show()
+
+sns.boxplot(x=df['age'])
+plt.show()
+
+# ============================================================
+# STEP 5: SPLIT
+# ============================================================
+X = df.drop('target', axis=1)
+y = df['target']
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42)
+
+# ============================================================
+# STEP 6: SCALE  *** FIT ONLY ON TRAIN ***
+# ============================================================
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)  # learns mean/std from train
+X_test  = scaler.transform(X_test)       # uses same mean/std — NO fit!
+
+# ============================================================
+# STEP 7: TRAIN
+# ============================================================
+model = DecisionTreeClassifier()
+model.fit(X_train, y_train)
+
+# Other models you can swap in:
+# model = LogisticRegression()
+# model = GaussianNB()
+
+# ============================================================
+# STEP 8: EVALUATE
+# ============================================================
+y_pred = model.predict(X_test)
+
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+print(classification_report(y_test, y_pred))
+
+# ============================================================
+# STEP 9: ROC CURVE (needs predict_proba not predict)
+# ============================================================
+probabilities = model.predict_proba(X_test)[:, 1]  # prob of class 1
+
+fpr, tpr, _ = roc_curve(y_test, probabilities)
+auc = roc_auc_score(y_test, probabilities)
+
+plt.figure(figsize=(8, 6))
+plt.plot(fpr, tpr, color='blue', lw=2, label=f'AUC = {auc:.2f}')
+plt.fill_between(fpr, tpr, color='skyblue', alpha=0.4)
+plt.plot([0, 1], [0, 1], 'gray', linestyle='--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.legend()
+plt.show()
+
+# ============================================================
+# K-FOLD CROSS VALIDATION
+# ============================================================
+# MUST convert to DataFrame/Series for .iloc to work
+X = pd.DataFrame(X)
+y = pd.Series(y)
+
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+model_kf = LogisticRegression()
+scores = []
+
+for train_idx, test_idx in kf.split(X):
+    X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
+    y_tr, y_te = y.iloc[train_idx], y.iloc[test_idx]
+    model_kf.fit(X_tr, y_tr)
+    scores.append(accuracy_score(y_te, model_kf.predict(X_te)))
+
+print("KFold Average Accuracy:", np.mean(scores))
+
+# ============================================================
+# LOOCV (Leave One Out)
+# ============================================================
+loo = LeaveOneOut()
+loo_scores = []
+
+for train_idx, test_idx in loo.split(X):
+    X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
+    y_tr, y_te = y.iloc[train_idx], y.iloc[test_idx]
+    model_kf.fit(X_tr, y_tr)
+    loo_scores.append(accuracy_score(y_te, model_kf.predict(X_te)))
+
+print("LOOCV Average Accuracy:", np.mean(loo_scores))
+
+
+================================================================
+LAB 11 — UNSUPERVISED LEARNING (K-Means)
+================================================================
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+
+# ============================================================
+# CUSTOMER SEGMENTATION (from your lab manual)
+# ============================================================
+df = pd.read_csv('Mall_Customers.csv')
+df.head()
+
+x = df.iloc[:, [3, 4]].values   # Annual Income, Spending Score
+
+# ELBOW METHOD — find best K
+wcss = []
+for i in range(1, 11):
+    km = KMeans(n_clusters=i, init='k-means++', random_state=42)
+    km.fit(x)
+    wcss.append(km.inertia_)    # inertia_ = WCSS
+
+plt.plot(range(1, 11), wcss)
+plt.title('Elbow Method Graph')
+plt.xlabel('Number of clusters (k)')
+plt.ylabel('WCSS')
+plt.show()
+# Pick K where curve bends sharply
+
+# Scale THEN cluster
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(x)
+
+kmeans = KMeans(n_clusters=5, init='k-means++', random_state=42)
+y_predict = kmeans.fit_predict(X_scaled)
+
+# Plot clusters
+colors = ['blue', 'green', 'red', 'black', 'purple']
+for i in range(5):
+    plt.scatter(x[y_predict == i, 0], x[y_predict == i, 1],
+                s=100, c=colors[i], label=f'Cluster {i+1}')
+
+plt.scatter(kmeans.cluster_centers_[:, 0],
+            kmeans.cluster_centers_[:, 1],
+            s=300, c='yellow', label='Centroid')
+plt.title('Clusters of Customers')
+plt.xlabel('Annual Income (k$)')
+plt.ylabel('Spending Score (1-100)')
+plt.legend()
+plt.show()
+
+# ============================================================
+# VEHICLE CLUSTERING (handles categorical + scaling task)
+# ============================================================
+data = {
+    'vehicle_serial_no': [5, 3, 8, 2, 4, 7, 6, 10, 1, 9],
+    'mileage': [150000, 120000, 250000, 80000, 100000,
+                220000, 180000, 300000, 75000, 280000],
+    'fuel_efficiency': [15, 18, 10, 22, 20, 12, 16, 8, 24, 9],
+    'maintenance_cost': [5000, 4000, 7000, 2000, 3000,
+                         6500, 5500, 8000, 1500, 7500],
+    'vehicle_type': ['SUV','Sedan','Truck','Hatchback','Sedan',
+                     'Truck','SUV','Truck','Hatchback','SUV']
+}
+df_v = pd.DataFrame(data)
+
+# Encode categorical
+le = LabelEncoder()
+df_v['vehicle_type'] = le.fit_transform(df_v['vehicle_type'])
+
+# Drop ID
+X_v = df_v.drop('vehicle_serial_no', axis=1)
+
+# --- WITHOUT SCALING ---
+km_no = KMeans(n_clusters=3, random_state=42)
+df_v['Cluster_NoScale'] = km_no.fit_predict(X_v)
+print("Without scaling:\n", df_v[['vehicle_serial_no','Cluster_NoScale']])
+
+# --- WITH SCALING (skip vehicle_type from scaling) ---
+cols_to_scale = ['mileage', 'fuel_efficiency', 'maintenance_cost']
+X_v_scaled = X_v.copy()
+scaler2 = StandardScaler()
+X_v_scaled[cols_to_scale] = scaler2.fit_transform(X_v[cols_to_scale])
+
+km_sc = KMeans(n_clusters=3, random_state=42)
+df_v['Cluster_Scaled'] = km_sc.fit_predict(X_v_scaled)
+print("With scaling:\n", df_v[['vehicle_serial_no','Cluster_Scaled']])
+
+# ============================================================
+# STUDENT CLUSTERING (Task 3 from your lab)
+# ============================================================
+data_s = {
+    'student_id': range(1, 21),
+    'GPA': [3.8,2.1,3.5,1.9,3.9,2.5,3.0,1.5,3.7,2.8,
+            3.2,1.8,3.6,2.3,3.4,1.6,3.1,2.7,3.8,2.0],
+    'study_hours': [20,5,15,3,22,8,12,2,18,10,
+                    14,4,17,7,16,3,13,9,21,6],
+    'attendance_rate': [95,60,88,55,97,70,80,45,92,75,
+                        83,58,90,65,87,50,82,72,96,62]
+}
+df_s = pd.DataFrame(data_s)
+
+features = ['GPA', 'study_hours', 'attendance_rate']
+X_s = df_s[features]
+
+# Scale
+scaler3 = StandardScaler()
+X_s_scaled = scaler3.fit_transform(X_s)
+
+# Elbow method K=2 to 6 (as specified in task)
+wcss_s = []
+for k in range(2, 7):
+    km = KMeans(n_clusters=k, random_state=42)
+    km.fit(X_s_scaled)
+    wcss_s.append(km.inertia_)
+
+plt.plot(range(2, 7), wcss_s, 'bo-')
+plt.title('Elbow Method')
+plt.xlabel('K'); plt.ylabel('WCSS')
+plt.show()
+
+# Apply optimal K (say 3)
+km_s = KMeans(n_clusters=3, random_state=42)
+df_s['Cluster'] = km_s.fit_predict(X_s_scaled)
+
+# Scatter plot
+plt.figure(figsize=(8, 6))
+for c in df_s['Cluster'].unique():
+    sub = df_s[df_s['Cluster'] == c]
+    plt.scatter(sub['study_hours'], sub['GPA'], label=f'Cluster {c}', s=100)
+plt.xlabel('Study Hours')
+plt.ylabel('GPA')
+plt.title('Student Clusters: Study Hours vs GPA')
+plt.legend()
+plt.show()
+
+# Show student IDs with cluster
+print(df_s[['student_id', 'GPA', 'study_hours', 'attendance_rate', 'Cluster']])
+
+
+================================================================
+QUICK REFERENCE — COMMON MISTAKES
+================================================================
+
+BAYESIAN NETWORK:
+  WRONG: BayesianNetwork([...])
+  RIGHT: DiscreteBayesianNetwork([...])
+
+  WRONG: evidence={'Fever': 'Yes'}
+  RIGHT: evidence={'Fever': 1}        # use 0 or 1, not strings
+
+  WRONG: forget check_model()
+  RIGHT: assert model.check_model()   # always verify before inference
+
+  COLUMN COUNT RULE:
+  - No parents     = 1 column
+  - 1 parent  x 2  = 2 columns
+  - 2 parents x 2  = 4 columns
+  - 3 parents x 2  = 8 columns
+
+SUPERVISED:
+  WRONG: X_test = scaler.fit_transform(X_test)
+  RIGHT: X_test = scaler.transform(X_test)
+
+  WRONG: for roc: model.predict(X_test)
+  RIGHT: model.predict_proba(X_test)[:, 1]
+
+  WRONG: X.iloc[] on numpy array
+  RIGHT: convert to DataFrame first: X = pd.DataFrame(X)
+
+UNSUPERVISED:
+  WRONG: scale BEFORE elbow method
+  RIGHT: elbow on raw data, then scale for final clustering
+
+  WRONG: model.fit(X_scaled)
+  RIGHT: model.fit_predict(X_scaled)  # gives cluster labels
+
+  WRONG: forget to encode text columns
+  RIGHT: LabelEncoder before clustering
+
+================================================================
+EVALUATION METRICS QUICK REFERENCE
+================================================================
+
+CLASSIFICATION:
+  accuracy_score(y_test, y_pred)
+  confusion_matrix(y_test, y_pred)
+  classification_report(y_test, y_pred)
+  roc_auc_score(y_test, proba)
+
+REGRESSION:
+  mean_squared_error(y_test, y_pred)
+  r2_score(y_test, y_pred)
+
+CONFUSION MATRIX:
+  TP = predicted YES, actually YES  (correct)
+  TN = predicted NO,  actually NO   (correct)
+  FP = predicted YES, actually NO   (wrong — false alarm)
+  FN = predicted NO,  actually YES  (wrong — missed it)
+
+ROC CURVE:
+  AUC = 1.0  → perfect classifier
+  AUC = 0.5  → random guess (diagonal line)
+  AUC > 0.8  → good classifier
+
+================================================================
+IMPORTS CHEAT SHEET — ALL IN ONE PLACE
+================================================================
+
+# Bayesian Network
+from pgmpy.models import DiscreteBayesianNetwork
+from pgmpy.factors.discrete import TabularCPD
+from pgmpy.inference import VariableElimination
+
+# Markov
+import numpy as np
+
+# Data handling
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Preprocessing
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+
+# Splitting
+from sklearn.model_selection import train_test_split, KFold, LeaveOneOut
+
+# Models
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB
+
+# Metrics
+from sklearn.metrics import (accuracy_score, confusion_matrix,
+                              classification_report,
+                              roc_curve, roc_auc_score,
+                              mean_squared_error, r2_score)
+
+# Clustering
+from sklearn.cluster import KMeans
+
+================================================================
+END OF FILE — GOOD LUCK!
+================================================================
